@@ -20,8 +20,23 @@ RUN apt-get update \
     && rm geckodriver-v0.36.0-${GECKO_ARCH}.tar.gz \
     && rm -rf /var/lib/apt/lists/*  # Clean up apt lists to reduce image size
 
+
+FROM install-browser as intermediate
+
+# Dependencies to build `primp` for ARM (previously we had problems with MacOS building this image)
+RUN apt-get update \
+    && apt-get install -y \
+        cmake \
+        ninja-build \
+        clang \
+        libclang-dev \
+        pkg-config \
+        perl \
+        git \
+        libssl-dev
+
 # Stage 2: Python dependencies installation
-FROM install-browser AS gpt-researcher-install
+FROM intermediate AS gpt-researcher-install
 
 ENV PIP_ROOT_USER_ACTION=ignore
 WORKDIR /usr/src/app
