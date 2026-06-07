@@ -20,7 +20,7 @@ langchain-text-splitters>=1.0.0
 # LLM & API
 openai>=1.3.3
 httpx>=0.28.1
-tavily-python>=0.7.12
+tavily-python>=0.7.25
 
 # Output formats
 aiofiles>=23.2.1
