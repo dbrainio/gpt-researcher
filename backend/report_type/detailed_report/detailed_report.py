@@ -141,6 +141,7 @@ class DetailedReport:
         )
 
         subtopic_report = await subtopic_assistant.write_report(self.existing_headers, relevant_contents)
+        self.gpt_researcher.add_costs(subtopic_assistant.get_usage())
 
         self.global_written_sections.extend(self.gpt_researcher.extract_sections(subtopic_report))
         self.global_context = list(set(subtopic_assistant.context))

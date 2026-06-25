@@ -24,7 +24,7 @@ class ReportGenerator:
             "tone": self.researcher.tone,
             "websocket": self.researcher.websocket,
             "cfg": self.researcher.cfg,
-            "headers": self.researcher.headers,
+            "headers": self.researcher.llm_headers,
         }
 
     async def write_report(self, existing_headers: list = [], relevant_written_contents: list = [], ext_context=None, custom_prompt="") -> str:
@@ -77,6 +77,16 @@ class ReportGenerator:
 
         report = await generate_report(**report_params, **self.researcher.kwargs)
 
+        if self.researcher.websocket:
+            await stream_output(
+                "usage",
+                "usage_summary",
+                "",
+                self.researcher.websocket,
+                False,
+                self.researcher.get_usage()
+            )
+
         if self.researcher.verbose:
             await stream_output(
                 "logs",
@@ -113,6 +123,7 @@ class ReportGenerator:
             cost_callback=self.researcher.add_costs,
             websocket=self.researcher.websocket,
             prompt_family=self.researcher.prompt_family,
+            headers=self.researcher.llm_headers,
             **self.researcher.kwargs
         )
 
@@ -144,6 +155,7 @@ class ReportGenerator:
             websocket=self.researcher.websocket,
             cost_callback=self.researcher.add_costs,
             prompt_family=self.researcher.prompt_family,
+            headers=self.researcher.llm_headers,
             **self.researcher.kwargs
         )
 
@@ -173,6 +185,7 @@ class ReportGenerator:
             config=self.researcher.cfg,
             subtopics=self.researcher.subtopics,
             prompt_family=self.researcher.prompt_family,
+            headers=self.researcher.llm_headers,
             **self.researcher.kwargs
         )
 
@@ -205,6 +218,7 @@ class ReportGenerator:
             config=self.researcher.cfg,
             cost_callback=self.researcher.add_costs,
             prompt_family=self.researcher.prompt_family,
+            headers=self.researcher.llm_headers,
             **self.researcher.kwargs
         )
 

@@ -41,6 +41,7 @@ async def choose_agent(
             llm_provider=cfg.smart_llm_provider,
             llm_kwargs=cfg.llm_kwargs,
             cost_callback=cost_callback,
+            headers=headers,
             **kwargs
         )
 

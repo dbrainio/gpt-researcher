@@ -50,6 +50,7 @@ class SourceCurator:
                 llm_provider=self.researcher.cfg.smart_llm_provider,
                 llm_kwargs=self.researcher.cfg.llm_kwargs,
                 cost_callback=self.researcher.add_costs,
+                headers=self.researcher.llm_headers,
             )
 
             curated_sources = json.loads(response)

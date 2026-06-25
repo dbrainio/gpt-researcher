@@ -55,13 +55,18 @@ async def create_chat_completion_with_tools(
     """
     try:
         from ..llm_provider.generic.base import GenericLLMProvider
-        
+
+        headers = kwargs.pop("headers", None)
+
         # Create LLM provider using the config
         provider_kwargs = {
             'model': model,
             **(llm_kwargs or {})
         }
-        
+        nevel_tracking = (headers or {}).get("nevel_tracking")
+        if nevel_tracking:
+            provider_kwargs["nevel_tracking"] = nevel_tracking
+
         llm_provider_instance = GenericLLMProvider.from_provider(
             llm_provider, 
             **provider_kwargs

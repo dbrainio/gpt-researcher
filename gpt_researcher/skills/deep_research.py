@@ -54,7 +54,7 @@ class DeepResearchSkill:
         self.websocket = researcher.websocket
         self.tone = researcher.tone
         self.config_path = researcher.cfg.config_path if hasattr(researcher.cfg, 'config_path') else None
-        self.headers = researcher.headers or {}
+        self.headers = researcher.llm_headers or {}
         self.visited_urls = researcher.visited_urls
         self.learnings = []
         self.research_sources = []  # Track all research sources
@@ -73,7 +73,9 @@ class DeepResearchSkill:
             llm_provider=self.researcher.cfg.strategic_llm_provider,
             model=self.researcher.cfg.strategic_llm_model,
             reasoning_effort=self.researcher.cfg.reasoning_effort,
-            temperature=0.4
+            temperature=0.4,
+            cost_callback=self.researcher.add_costs,
+            headers=self.researcher.llm_headers
         )
 
         lines = response.split('\n')
@@ -128,7 +130,9 @@ Format each question on a new line starting with 'Question: '"""}
             llm_provider=self.researcher.cfg.strategic_llm_provider,
             model=self.researcher.cfg.strategic_llm_model,
             reasoning_effort=ReasoningEfforts.High.value,
-            temperature=0.4
+            temperature=0.4,
+            cost_callback=self.researcher.add_costs,
+            headers=self.researcher.llm_headers
         )
 
         questions = [q.replace('Question:', '').strip()
@@ -150,7 +154,9 @@ Format each question on a new line starting with 'Question: '"""}
             model=self.researcher.cfg.strategic_llm_model,
             temperature=0.4,
             reasoning_effort=ReasoningEfforts.High.value,
-            max_tokens=1000
+            max_tokens=1000,
+            cost_callback=self.researcher.add_costs,
+            headers=self.researcher.llm_headers
         )
 
         lines = response.split('\n')
@@ -251,6 +257,7 @@ Format each question on a new line starting with 'Question: '"""}
 
                     # Conduct research
                     context = await researcher.conduct_research()
+                    self.researcher.add_costs(researcher.get_usage())
 
                     # Get results and visited URLs
                     visited = researcher.visited_urls
