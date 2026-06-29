@@ -16,6 +16,7 @@ async def write_report_introduction(
     config: Config,
     websocket=None,
     cost_callback: callable = None,
+    headers=None,
     prompt_family: type[PromptFamily] | PromptFamily = PromptFamily,
     **kwargs
 ) -> str:
@@ -52,6 +53,7 @@ async def write_report_introduction(
             max_tokens=config.smart_token_limit,
             llm_kwargs=config.llm_kwargs,
             cost_callback=cost_callback,
+            headers=headers,
             **kwargs
         )
         return introduction
@@ -67,6 +69,7 @@ async def write_conclusion(
     config: Config,
     websocket=None,
     cost_callback: callable = None,
+    headers=None,
     prompt_family: type[PromptFamily] | PromptFamily = PromptFamily,
     **kwargs
 ) -> str:
@@ -104,6 +107,7 @@ async def write_conclusion(
             max_tokens=config.smart_token_limit,
             llm_kwargs=config.llm_kwargs,
             cost_callback=cost_callback,
+            headers=headers,
             **kwargs
         )
         return conclusion
@@ -119,6 +123,7 @@ async def summarize_url(
     config: Config,
     websocket=None,
     cost_callback: callable = None,
+    headers=None,
     **kwargs
 ) -> str:
     """
@@ -149,6 +154,7 @@ async def summarize_url(
             max_tokens=config.smart_token_limit,
             llm_kwargs=config.llm_kwargs,
             cost_callback=cost_callback,
+            headers=headers,
             **kwargs
         )
         return summary
@@ -165,6 +171,7 @@ async def generate_draft_section_titles(
     config: Config,
     websocket=None,
     cost_callback: callable = None,
+    headers=None,
     prompt_family: type[PromptFamily] | PromptFamily = PromptFamily,
     **kwargs
 ) -> List[str]:
@@ -198,6 +205,7 @@ async def generate_draft_section_titles(
             max_tokens=config.smart_token_limit,
             llm_kwargs=config.llm_kwargs,
             cost_callback=cost_callback,
+            headers=headers,
             **kwargs
         )
         return section_titles.split("\n")
@@ -267,6 +275,7 @@ async def generate_report(
             max_tokens=cfg.smart_token_limit,
             llm_kwargs=cfg.llm_kwargs,
             cost_callback=cost_callback,
+            headers=headers,
             **kwargs
         )
     except:
@@ -283,6 +292,7 @@ async def generate_report(
                 max_tokens=cfg.smart_token_limit,
                 llm_kwargs=cfg.llm_kwargs,
                 cost_callback=cost_callback,
+                headers=headers,
                 **kwargs
             )
         except Exception as e:

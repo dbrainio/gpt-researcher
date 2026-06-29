@@ -58,6 +58,7 @@ class ResearchConductor:
             report_type=self.researcher.report_type,
             cost_callback=self.researcher.add_costs,
             retriever_names=retriever_names,  # Pass retriever names for MCP optimization
+            headers=self.researcher.llm_headers,
             **self.researcher.kwargs
         )
         self.logger.info(f"Research outline planned: {outline}")
@@ -99,7 +100,7 @@ class ResearchConductor:
                 cfg=self.researcher.cfg,
                 parent_query=self.researcher.parent_query,
                 cost_callback=self.researcher.add_costs,
-                headers=self.researcher.headers,
+                headers=self.researcher.llm_headers,
                 prompt_family=self.researcher.prompt_family
             )
                 
@@ -963,4 +964,3 @@ class ResearchConductor:
                     "progress": progress
                 }
             )
-

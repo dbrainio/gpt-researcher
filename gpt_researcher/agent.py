@@ -140,8 +140,25 @@ class GPTResearcher:
         self.visited_urls = visited_urls or set()
         self.verbose = verbose
         self.context = context or []
-        self.headers = headers or {}
+        incoming_headers = headers or {}
+        self.nevel_tracking = incoming_headers.get("nevel_tracking")
+        self.headers = {
+            key: value
+            for key, value in incoming_headers.items()
+            if key != "nevel_tracking"
+        }
+        self.llm_headers = dict(self.headers)
+        if self.nevel_tracking:
+            self.llm_headers["nevel_tracking"] = self.nevel_tracking
         self.research_costs = 0.0
+        self.research_usage = {
+            "model_id": None,
+            "models": [],
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "total_tokens": 0,
+            "cost": 0.0,
+        }
         self.log_handler = log_handler
         self.prompt_family = get_prompt_family(prompt_family or self.cfg.prompt_family, self.cfg)
         
@@ -308,7 +325,7 @@ class GPTResearcher:
                 cfg=self.cfg,
                 parent_query=self.parent_query,
                 cost_callback=self.add_costs,
-                headers=self.headers,
+                headers=self.llm_headers,
                 prompt_family=self.prompt_family,
                 **self.kwargs,
                 # **filtered_kwargs
@@ -457,13 +474,43 @@ class GPTResearcher:
     def get_costs(self) -> float:
         return self.research_costs
 
+    def get_usage(self) -> dict:
+        return dict(self.research_usage)
+
     def set_verbose(self, verbose: bool):
         self.verbose = verbose
 
-    def add_costs(self, cost: float) -> None:
+    def add_costs(self, cost: float | dict) -> None:
+        if isinstance(cost, dict):
+            prompt_tokens = int(cost.get("prompt_tokens") or cost.get("tokens_in") or 0)
+            completion_tokens = int(cost.get("completion_tokens") or cost.get("tokens_out") or 0)
+            total_tokens = int(cost.get("total_tokens") or prompt_tokens + completion_tokens)
+            usage_cost = float(cost.get("cost") or 0.0)
+            model = cost.get("model") or cost.get("model_id")
+
+            self.research_usage["tokens_in"] += prompt_tokens
+            self.research_usage["tokens_out"] += completion_tokens
+            self.research_usage["total_tokens"] += total_tokens
+            self.research_usage["cost"] += usage_cost
+            self.research_costs += usage_cost
+
+            if model:
+                self.research_usage["model_id"] = model
+                if model not in self.research_usage["models"]:
+                    self.research_usage["models"].append(model)
+
+            if self.log_handler:
+                self._log_event("research", step="usage_update", details={
+                    "usage": cost,
+                    "total_usage": self.research_usage,
+                })
+
+            return
+
         if not isinstance(cost, (float, int)):
             raise ValueError("Cost must be an integer or float")
         self.research_costs += cost
+        self.research_usage["cost"] += float(cost)
         if self.log_handler:
             self._log_event("research", step="cost_update", details={
                 "cost": cost,

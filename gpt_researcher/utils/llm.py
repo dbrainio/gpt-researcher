@@ -30,6 +30,7 @@ async def create_chat_completion(
         websocket: Any | None = None,
         llm_kwargs: dict[str, Any] | None = None,
         cost_callback: callable = None,
+        headers: dict[str, Any] | None = None,
         reasoning_effort: str | None = ReasoningEfforts.Medium.value,
         **kwargs
 ) -> str:
@@ -62,6 +63,10 @@ async def create_chat_completion(
     if llm_kwargs:
         provider_kwargs.update(llm_kwargs)
 
+    nevel_tracking = (headers or {}).get("nevel_tracking")
+    if nevel_tracking:
+        provider_kwargs["nevel_tracking"] = nevel_tracking
+
     if model in SUPPORT_REASONING_EFFORT_MODELS:
         provider_kwargs['reasoning_effort'] = reasoning_effort
 
@@ -79,13 +84,26 @@ async def create_chat_completion(
 
     provider = get_llm(llm_provider, **provider_kwargs)
     response = ""
+    usage_reported = False
+
+    def record_cost(cost_or_usage):
+        nonlocal usage_reported
+        if isinstance(cost_or_usage, dict):
+            usage_reported = True
+        if cost_callback:
+            cost_callback(cost_or_usage)
+
     # create response
     for _ in range(10):  # maximum of 10 attempts
         response = await provider.get_chat_response(
-            messages, stream, websocket, **kwargs
+            messages,
+            stream,
+            websocket,
+            cost_callback=record_cost if cost_callback else None,
+            **kwargs
         )
 
-        if cost_callback:
+        if cost_callback and not usage_reported:
             llm_costs = estimate_llm_cost(str(messages), response)
             cost_callback(llm_costs)
 
@@ -101,6 +119,7 @@ async def construct_subtopics(
     config,
     subtopics: list = [],
     prompt_family: type[PromptFamily] | PromptFamily = PromptFamily,
+    headers: dict[str, Any] | None = None,
     **kwargs
 ) -> list:
     """
@@ -131,6 +150,10 @@ async def construct_subtopics(
 
         if config.llm_kwargs:
             provider_kwargs.update(config.llm_kwargs)
+
+        nevel_tracking = (headers or {}).get("nevel_tracking")
+        if nevel_tracking:
+            provider_kwargs["nevel_tracking"] = nevel_tracking
 
         if config.smart_llm_model in SUPPORT_REASONING_EFFORT_MODELS:
             provider_kwargs['reasoning_effort'] = ReasoningEfforts.High.value

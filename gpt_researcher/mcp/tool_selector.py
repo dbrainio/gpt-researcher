@@ -154,6 +154,7 @@ class MCPToolSelector:
                 llm_provider=self.cfg.strategic_llm_provider,
                 llm_kwargs=self.cfg.llm_kwargs,
                 cost_callback=self.researcher.add_costs if self.researcher and hasattr(self.researcher, 'add_costs') else None,
+                headers=self.researcher.llm_headers if self.researcher and hasattr(self.researcher, 'llm_headers') else None,
             )
             return result
         except Exception as e:
@@ -201,4 +202,4 @@ class MCPToolSelector:
         for i, (tool, score) in enumerate(scored_tools[:max_tools]):
             logger.info(f"Fallback selected tool {i+1}: {tool.name} (score: {score})")
         
-        return selected_tools 
+        return selected_tools
