@@ -5,6 +5,7 @@ import os
 from typing import Literal, Sequence, Optional
 import requests
 import json
+from gpt_researcher.utils.budget import current_research_budget, ResearchBudgetError
 
 
 class TavilySearch:
@@ -83,9 +84,13 @@ class TavilySearch:
             "use_cache": use_cache,
         }
 
-        response = requests.post(
-            self.base_url, data=json.dumps(data), headers=self.headers, timeout=100
-        )
+        budget = current_research_budget.get()
+        if budget is not None:
+            response = budget.http_clients()["http_client"].post(self.base_url, json=data, headers=self.headers, timeout=100)
+        else:
+            response = requests.post(
+                self.base_url, data=json.dumps(data), headers=self.headers, timeout=100
+            )
 
         if response.status_code == 200:
             return response.json()
@@ -115,6 +120,8 @@ class TavilySearch:
             search_response = [
                 {"href": obj["url"], "body": obj["content"]} for obj in sources
             ]
+        except ResearchBudgetError:
+            raise
         except Exception as e:
             print(f"Error: {e}. Failed fetching sources. Resulting in empty response.")
             search_response = []

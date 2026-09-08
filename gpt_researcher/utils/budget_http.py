@@ -29,6 +29,16 @@ class NativeEvidence:
         value = json.loads(data, parse_float=Decimal)
         if not isinstance(value, dict):
             raise ResearchBudgetError()
+        if self.operation.tavily is True:
+            identity = value.get("request_id")
+            if isinstance(identity, str) and len(identity) <= 256 and re.fullmatch(r"[A-Za-z0-9_-]+", identity):
+                self.operation.observe(identity)
+            usage = value.get("usage")
+            credits = usage.get("credits") if isinstance(usage, dict) else None
+            if type(credits) is int or isinstance(credits, Decimal):
+                credits = str(credits)
+            self.operation.finalize_tavily(credits)
+            return
         if self.operation.embedding is True:
             usage = value.get("usage")
             if (not isinstance(usage, dict) or type(usage.get("prompt_tokens")) is not int
@@ -138,6 +148,10 @@ class _ObservedStream(httpx.AsyncByteStream):
 
 
 def _prepare_request(budget, request, data):
+    if (request.method == "POST" and request.url.scheme == "https" and request.url.host == "api.tavily.com"
+            and request.url.port in {None, 443} and request.url.path in {"/search", "/extract"} and not request.url.query):
+        from .budget_tavily import prepare_tavily_request
+        return prepare_tavily_request(budget, request, data)
     if (request.method == "POST" and request.url.scheme == "https" and request.url.host == "api.openai.com"
             and request.url.port in {None, 443} and request.url.path == "/v1/embeddings" and not request.url.query):
         from .budget_embedding import prepare_embedding_request
@@ -196,6 +210,11 @@ class ResearchBudgetTransport(httpx.AsyncBaseTransport):
             await _drain_cancelled_admission(admission)
             raise
         # No refunds or retries for any exception/status after this point.
+        try:
+            self.budget.ensure_active()
+        except Exception:
+            await _drain_cancelled_admission(admission)
+            raise
         if operation is not None:
             operation.mark_started()
         try:
@@ -216,7 +235,7 @@ class ResearchBudgetTransport(httpx.AsyncBaseTransport):
                 await response.aclose()
                 raise
         return httpx.Response(response.status_code, headers=_decoded_headers(response), extensions=response.extensions,
-                              stream=_ObservedStream(_DecodedAsyncResponse(response), operation, operation.embedding is not True and "text/event-stream" in response.headers.get("content-type", ""), self.budget.deny_new_calls))
+                              stream=_ObservedStream(_DecodedAsyncResponse(response), operation, operation.embedding is not True and operation.tavily is not True and "text/event-stream" in response.headers.get("content-type", ""), self.budget.deny_new_calls))
 
     async def aclose(self):
         await self.native.aclose()
@@ -247,6 +266,17 @@ def _observe_embedding_response(operation, response):
     identity = response.headers.get("x-request-id")
     if identity and len(identity) <= 256 and re.fullmatch(r"[A-Za-z0-9_-]+", identity):
         operation.observe(identity)
+
+
+def _start_native(budget, operation):
+    try:
+        budget.ensure_active()
+    except Exception:
+        if operation is not None:
+            operation.release_unstarted()
+        raise
+    if operation is not None:
+        operation.mark_started()
 
 
 class _ObservedSyncStream(httpx.SyncByteStream):
@@ -292,8 +322,7 @@ class ResearchBudgetSyncTransport(httpx.BaseTransport):
 
     def handle_request(self, request):
         request, operation = _prepare_request(self.budget, request, request.read())
-        if operation is not None:
-            operation.mark_started()
+        _start_native(self.budget, operation)
         try:
             response = self.native.send(request, stream=True, follow_redirects=False)
         except Exception:
@@ -312,7 +341,7 @@ class ResearchBudgetSyncTransport(httpx.BaseTransport):
                 response.close()
                 raise
         return httpx.Response(response.status_code, headers=_decoded_headers(response), extensions=response.extensions,
-                              stream=_ObservedSyncStream(_DecodedSyncResponse(response), operation, operation.embedding is not True and "text/event-stream" in response.headers.get("content-type", ""), self.budget.deny_new_calls))
+                              stream=_ObservedSyncStream(_DecodedSyncResponse(response), operation, operation.embedding is not True and operation.tavily is not True and "text/event-stream" in response.headers.get("content-type", ""), self.budget.deny_new_calls))
 
     def close(self):
         self.native.close()

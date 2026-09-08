@@ -161,6 +161,30 @@ class ResearchBudget:
         except Exception as error:
             return self._admission_error(error)
 
+    def reserve_tavily(self, endpoint: str, depth: str, units: int):
+        step = self._next_step()
+        try:
+            if (step > 511 or endpoint not in {"search", "extract"} or depth not in {"basic", "advanced"}
+                    or type(units) is not int or not 1 <= units <= 20 or (endpoint == "search" and units != 1)):
+                raise ResearchBudgetError("budget_invalid_transition")
+            result = self._callback(self._capability, {
+                "action": "reserve_tavily", "step": step, "endpoint": endpoint, "depth": depth, "units": units,
+            })
+            if result == {"kind": "bypass"}:
+                return None
+            if (not isinstance(result, dict) or result.get("kind") != "tracked_tavily"
+                    or not _credential(result.get("receipt")) or result.get("mode") != self.mode
+                    or result.get("endpoint") != endpoint or result.get("depth") != depth):
+                raise ResearchBudgetError("budget_invalid_transition")
+            return ResearchBudgetOperation(self._callback, result)
+        except Exception as error:
+            return self._admission_error(error)
+
+    def ensure_active(self):
+        with self._lock:
+            if self._closed or self._failure:
+                raise ResearchBudgetError(self._failure or "budget_invalid_transition")
+
     def _admission_error(self, error):
         if self.mode == "shadow" and not (
             isinstance(error, ResearchBudgetError) and error.code in {"budget_exceeded", "budget_idempotency_conflict", "budget_invalid_transition"}
@@ -210,8 +234,9 @@ class ResearchBudgetOperation:
         self._callback = callback
         self._receipt = admission["receipt"]
         self.mode = admission["mode"]
-        self.model_id = admission["modelId"]
+        self.model_id = admission.get("modelId")
         self.embedding = admission.get("kind") == "tracked_embedding"
+        self.tavily = admission.get("kind") == "tracked_tavily"
         self.max_output_tokens = admission.get("maxOutputTokens")
         self._provider_id = None
         self._observed = False
@@ -260,7 +285,7 @@ class ResearchBudgetOperation:
     def finalize(self, cost_usd: str):
         # Decimal string from native JSON. Do not coerce None/NaN/bool to zero or
         # turn a token estimate into native provider cost.
-        if self.embedding or self._released or not isinstance(cost_usd, str) or len(cost_usd) > 128 or not re.fullmatch(r"\d+(?:\.\d+)?(?:[eE][+-]?\d+)?", cost_usd):
+        if self.embedding or self.tavily or self._released or not isinstance(cost_usd, str) or len(cost_usd) > 128 or not re.fullmatch(r"\d+(?:\.\d+)?(?:[eE][+-]?\d+)?", cost_usd):
             raise ResearchBudgetError("budget_invalid_transition")
         if self._finalized is not None:
             if self._finalized != cost_usd:
@@ -280,6 +305,17 @@ class ResearchBudgetOperation:
         if self._send({"action": "finalize_embedding", "modelId": model,
                        "inputTokens": input_tokens, "providerUsageId": self._provider_id}):
             self._finalized = input_tokens
+
+    def finalize_tavily(self, credits: str):
+        if (not self.tavily or self._released or not isinstance(credits, str) or len(credits) > 64
+                or not re.fullmatch(r"\d+(?:\.\d+)?(?:[eE][+-]?\d+)?", credits)):
+            raise ResearchBudgetError("budget_invalid_transition")
+        if self._finalized is not None:
+            if self._finalized != credits:
+                raise ResearchBudgetError("budget_idempotency_conflict")
+            return
+        if self._send({"action": "finalize_tavily", "credits": credits, "providerUsageId": self._provider_id}):
+            self._finalized = credits
 
 
 current_research_budget: ContextVar[ResearchBudget | None] = ContextVar("research_budget", default=None)

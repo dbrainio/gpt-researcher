@@ -1,14 +1,18 @@
 from bs4 import BeautifulSoup
 import os
 from ..utils import get_relevant_images, extract_title
+from gpt_researcher.utils.budget import current_research_budget, ResearchBudgetError
 
 class TavilyExtract:
 
     def __init__(self, link, session=None):
         self.link = link
         self.session = session
-        from tavily import TavilyClient
-        self.tavily_client = TavilyClient(api_key=self.get_api_key())
+        self.api_key = self.get_api_key()
+        self.tavily_client = None
+        if current_research_budget.get() is None:
+            from tavily import TavilyClient
+            self.tavily_client = TavilyClient(api_key=self.api_key)
 
     def get_api_key(self) -> str:
         """
@@ -36,7 +40,15 @@ class TavilyExtract:
         """
 
         try:
-            response = self.tavily_client.extract(urls=self.link)
+            budget = current_research_budget.get()
+            if budget is not None:
+                native = budget.http_clients()["http_client"].post("https://api.tavily.com/extract", json={
+                    "urls": self.link, "extract_depth": "basic", "api_key": self.api_key,
+                }, timeout=100)
+                native.raise_for_status()
+                response = native.json()
+            else:
+                response = self.tavily_client.extract(urls=self.link)
             if response['failed_results']:
                 return "", [], ""
 
@@ -57,6 +69,8 @@ class TavilyExtract:
 
             return content, image_urls, title
 
+        except ResearchBudgetError:
+            raise
         except Exception as e:
             print("Error! : " + str(e))
             return "", [], ""

@@ -1,4 +1,5 @@
 import asyncio
+from contextvars import copy_context
 from colorama import Fore, init
 
 import requests
@@ -109,7 +110,7 @@ class Scraper:
                         image_urls,
                         title,
                     ) = await asyncio.get_running_loop().run_in_executor(
-                        self.worker_pool.executor, scraper.scrape
+                        self.worker_pool.executor, copy_context().run, scraper.scrape
                     )
 
                 if len(content) < 100:
