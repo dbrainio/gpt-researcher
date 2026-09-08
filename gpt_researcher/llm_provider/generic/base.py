@@ -9,6 +9,7 @@ from typing import Any
 from colorama import Fore, Style, init
 import os
 from enum import Enum
+from gpt_researcher.utils.usage import extract_usage_report as _extract_usage_report
 
 _SUPPORTED_PROVIDERS = {
     "openai",
@@ -91,22 +92,6 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _as_number(value: Any) -> float | None:
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str) and value.strip():
-        try:
-            return float(value)
-        except ValueError:
-            return None
-    return None
-
-
-def _as_int(value: Any) -> int | None:
-    number = _as_number(value)
-    return int(number) if number is not None else None
-
-
 def _build_openrouter_extra_body(tracking: Any) -> dict[str, Any]:
     if not isinstance(tracking, dict):
         return {}
@@ -142,63 +127,6 @@ def _merge_extra_body(existing: Any, incoming: dict[str, Any]) -> dict[str, Any]
             merged[key] = value
 
     return merged
-
-
-def _extract_usage_report(message: Any, fallback_model: str | None = None) -> dict[str, Any] | None:
-    usage_metadata = _as_dict(getattr(message, "usage_metadata", None))
-    response_metadata = _as_dict(getattr(message, "response_metadata", None))
-    token_usage = (
-        _as_dict(response_metadata.get("token_usage"))
-        or _as_dict(response_metadata.get("usage"))
-        or _as_dict(response_metadata.get("usage_metadata"))
-    )
-    usage = {**token_usage, **usage_metadata}
-
-    if not usage:
-        return None
-
-    prompt_tokens = (
-        _as_int(usage.get("input_tokens"))
-        or _as_int(usage.get("prompt_tokens"))
-        or _as_int(usage.get("tokens_in"))
-    )
-    completion_tokens = (
-        _as_int(usage.get("output_tokens"))
-        or _as_int(usage.get("completion_tokens"))
-        or _as_int(usage.get("tokens_out"))
-    )
-    total_tokens = (
-        _as_int(usage.get("total_tokens"))
-        or (
-            (prompt_tokens or 0) + (completion_tokens or 0)
-            if prompt_tokens is not None or completion_tokens is not None
-            else None
-        )
-    )
-    cost = (
-        _as_number(usage.get("cost"))
-        or _as_number(usage.get("total_cost"))
-        or _as_number(response_metadata.get("cost"))
-    )
-    model = (
-        response_metadata.get("model_name")
-        or response_metadata.get("model")
-        or usage.get("model")
-        or fallback_model
-    )
-
-    if prompt_tokens is None and completion_tokens is None and total_tokens is None and cost is None:
-        return None
-
-    report: dict[str, Any] = {
-        "model": model,
-        "prompt_tokens": prompt_tokens or 0,
-        "completion_tokens": completion_tokens or 0,
-        "total_tokens": total_tokens or 0,
-        "cost": cost or 0.0,
-    }
-
-    return report
 
 
 class GenericLLMProvider:

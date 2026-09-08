@@ -5,6 +5,7 @@ import os
 from .config import Config
 from .memory import Memory
 from .utils.enum import ReportSource, ReportType, Tone
+from .utils.usage import empty_research_usage, accumulate_research_usage
 from .llm_provider import GenericLLMProvider
 from .prompts import get_prompt_family
 from .vector_store import VectorStoreWrapper
@@ -151,14 +152,7 @@ class GPTResearcher:
         if self.nevel_tracking:
             self.llm_headers["nevel_tracking"] = self.nevel_tracking
         self.research_costs = 0.0
-        self.research_usage = {
-            "model_id": None,
-            "models": [],
-            "tokens_in": 0,
-            "tokens_out": 0,
-            "total_tokens": 0,
-            "cost": 0.0,
-        }
+        self.research_usage = empty_research_usage()
         self.log_handler = log_handler
         self.prompt_family = get_prompt_family(prompt_family or self.cfg.prompt_family, self.cfg)
         
@@ -481,24 +475,9 @@ class GPTResearcher:
         self.verbose = verbose
 
     def add_costs(self, cost: float | dict) -> None:
+        self.research_usage = accumulate_research_usage(self.research_usage, cost)
+        self.research_costs = self.research_usage["cost"]
         if isinstance(cost, dict):
-            prompt_tokens = int(cost.get("prompt_tokens") or cost.get("tokens_in") or 0)
-            completion_tokens = int(cost.get("completion_tokens") or cost.get("tokens_out") or 0)
-            total_tokens = int(cost.get("total_tokens") or prompt_tokens + completion_tokens)
-            usage_cost = float(cost.get("cost") or 0.0)
-            model = cost.get("model") or cost.get("model_id")
-
-            self.research_usage["tokens_in"] += prompt_tokens
-            self.research_usage["tokens_out"] += completion_tokens
-            self.research_usage["total_tokens"] += total_tokens
-            self.research_usage["cost"] += usage_cost
-            self.research_costs += usage_cost
-
-            if model:
-                self.research_usage["model_id"] = model
-                if model not in self.research_usage["models"]:
-                    self.research_usage["models"].append(model)
-
             if self.log_handler:
                 self._log_event("research", step="usage_update", details={
                     "usage": cost,
@@ -507,10 +486,6 @@ class GPTResearcher:
 
             return
 
-        if not isinstance(cost, (float, int)):
-            raise ValueError("Cost must be an integer or float")
-        self.research_costs += cost
-        self.research_usage["cost"] += float(cost)
         if self.log_handler:
             self._log_event("research", step="cost_update", details={
                 "cost": cost,
