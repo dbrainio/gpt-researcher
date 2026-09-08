@@ -10,6 +10,7 @@ from typing import Awaitable, Dict, List, Any
 from fastapi.responses import JSONResponse, FileResponse
 from gpt_researcher.document.document import DocumentLoader
 from gpt_researcher import GPTResearcher
+from gpt_researcher.utils.budget import find_budget_error
 from utils import write_md_to_pdf, write_md_to_word, write_text_to_md
 from pathlib import Path
 from datetime import datetime
@@ -295,12 +296,17 @@ async def handle_websocket_communication(websocket, manager):
                 logger.info("Task cancelled.")
                 raise
             except Exception as e:
-                logger.error(f"Error running task: {e}\n{traceback.format_exc()}")
+                budget_error = find_budget_error(e)
+                if budget_error:
+                    logger.warning("Research stopped by budget policy: %s", budget_error.code)
+                else:
+                    logger.error(f"Error running task: {e}\n{traceback.format_exc()}")
                 await websocket.send_json(
                     {
                         "type": "logs",
                         "content": "error",
-                        "output": f"Error: {e}",
+                        "output": str(budget_error) if budget_error else f"Error: {e}",
+                        **({"metadata": {"budget_error_code": budget_error.code}} if budget_error else {}),
                     }
                 )
 
@@ -310,18 +316,14 @@ async def handle_websocket_communication(websocket, manager):
         while True:
             try:
                 data = await websocket.receive_text()
-                logger.info(
-                    f"Received WebSocket message: {data[:50]}..."
-                    if len(data) > 50
-                    else data
-                )
+                logger.info("Received WebSocket message (%s bytes)", len(data))
 
                 if data == "ping":
                     await websocket.send_text("pong")
                 elif running_task and not running_task.done():
                     # discard any new request if a task is already running
                     logger.warning(
-                        f"Received request while task is already running. Request data preview: {data[: min(20, len(data))]}..."
+                        "Received request while task is already running"
                     )
                     await websocket.send_json(
                         {

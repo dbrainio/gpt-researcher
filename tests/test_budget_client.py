@@ -19,6 +19,15 @@ def tracked(mode="enforce"):
 
 
 class BudgetClientTests(unittest.TestCase):
+    def test_wrapped_sdk_errors_preserve_the_budget_code_and_cycles_terminate(self):
+        native = budget.ResearchBudgetError("budget_exceeded")
+        sdk = RuntimeError("connection wrapper")
+        sdk.__cause__ = native
+        self.assertIs(budget.find_budget_error(sdk), native)
+        cycle = RuntimeError("cycle")
+        cycle.__cause__ = cycle
+        self.assertIsNone(budget.find_budget_error(cycle))
+
     def test_reserve_scope_and_controls_then_original_receipt_for_settlement(self):
         callback = Mock(side_effect=[tracked(), {"kind": "acknowledged"}, {"kind": "acknowledged"}])
         run = budget.ResearchBudget(CAP, "enforce", callback)
@@ -138,11 +147,16 @@ class BudgetClientTests(unittest.TestCase):
         transport = budget.BudgetCallback("https://app.test/api/internal/budget/operations")
         transport._opener = Mock()
         for raw, expected in [(b'{"code":"budget_exceeded","error":"private"}', "budget_exceeded"), (b'{"code":{},"error":"private"}', "budget_internal_error"), (b"not json", "budget_internal_error")]:
-            transport._opener.open.side_effect = HTTPError("https://app.test", 429, "private", {}, BytesIO(raw))
+            transport._opener.open.side_effect = HTTPError("https://app.test", 500, "private", {}, BytesIO(raw))
             with self.assertRaises(budget.ResearchBudgetError) as caught:
                 transport(CAP, {})
             self.assertEqual(caught.exception.code, expected)
             self.assertNotIn("private", str(caught.exception))
+        for status, expected in [(401, "budget_invalid_transition"), (403, "budget_invalid_transition"), (409, "budget_invalid_transition"), (429, "budget_exceeded")]:
+            transport._opener.open.side_effect = HTTPError("https://app.test", status, "private", {}, BytesIO(b"{}"))
+            with self.assertRaises(budget.ResearchBudgetError) as caught:
+                transport(CAP, {})
+            self.assertEqual(caught.exception.code, expected)
         self.assertIsNone(budget._NoRedirect().redirect_request(None, None, 302, "", {}, "https://other.example"))
 
 

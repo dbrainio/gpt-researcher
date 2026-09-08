@@ -74,6 +74,10 @@ class BudgetCallback:
                 pass
             finally:
                 error.close()
+            if error.code in {401, 403, 409}:
+                code = "budget_invalid_transition"
+            elif error.code == 429:
+                code = "budget_exceeded"
             raise ResearchBudgetError(code) from None
         except Exception:
             # urllib errors can carry response/request objects. Don't retain
@@ -140,6 +144,11 @@ class ResearchBudget:
     def deny_new_calls(self, code=None):
         with self._lock:
             self._failure = ResearchBudgetError(code).code
+
+    def raise_if_denied(self):
+        with self._lock:
+            if self._failure:
+                raise ResearchBudgetError(self._failure)
 
     def http_clients(self):
         # Reuse one connection pool pair per run, not one pair per model step.
@@ -217,3 +226,15 @@ class ResearchBudgetOperation:
 
 
 current_research_budget: ContextVar[ResearchBudget | None] = ContextVar("research_budget", default=None)
+
+
+def find_budget_error(error):
+    seen = set()
+    for _ in range(8):
+        if isinstance(error, ResearchBudgetError):
+            return error
+        if not isinstance(error, BaseException) or id(error) in seen:
+            break
+        seen.add(id(error))
+        error = error.__cause__ or error.__context__
+    return None

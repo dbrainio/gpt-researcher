@@ -146,7 +146,7 @@ class GPTResearcher:
         self.headers = {
             key: value
             for key, value in incoming_headers.items()
-            if key != "nevel_tracking"
+            if key not in {"nevel_tracking", "nevel_budget"}
         }
         self.llm_headers = dict(self.headers)
         if self.nevel_tracking:
