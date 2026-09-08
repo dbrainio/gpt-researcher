@@ -107,11 +107,37 @@ class ResearchBudget:
 
     def reserve_model(self, model: str, input_bytes: int, max_output_tokens: int):
         # One namespace across child researchers and concurrent executor threads.
+        step = self._next_step()
+        return self._reserve_model(step, model, input_bytes, max_output_tokens)
+
+    def _next_step(self):
         with self._lock:
             if self._closed or self._failure:
                 raise ResearchBudgetError(self._failure or "budget_invalid_transition")
             step = self._counter
             self._counter += 1
+            return step
+
+    def reserve_embedding(self, model: str, input_tokens: int):
+        step = self._next_step()
+        try:
+            if (step > 511 or model != "text-embedding-3-small" or type(input_tokens) is not int
+                    or not 1 <= input_tokens <= 300_000):
+                raise ResearchBudgetError("budget_invalid_transition")
+            result = self._callback(self._capability, {
+                "action": "reserve_embedding", "step": step, "modelId": model, "inputTokens": input_tokens,
+            })
+            if result == {"kind": "bypass"}:
+                return None
+            if (not isinstance(result, dict) or result.get("kind") != "tracked_embedding"
+                    or not _credential(result.get("receipt")) or result.get("mode") != self.mode
+                    or result.get("modelId") != model):
+                raise ResearchBudgetError("budget_invalid_transition")
+            return ResearchBudgetOperation(self._callback, result)
+        except Exception as error:
+            return self._admission_error(error)
+
+    def _reserve_model(self, step, model, input_bytes, max_output_tokens):
         try:
             if (step > 511 or not isinstance(model, str) or not 1 <= len(model) <= 160
                     or type(input_bytes) is not int or not 0 <= input_bytes <= 4_194_304
@@ -133,13 +159,16 @@ class ResearchBudget:
                 raise ResearchBudgetError()
             return ResearchBudgetOperation(self._callback, result)
         except Exception as error:
-            if self.mode == "shadow" and not (
-                isinstance(error, ResearchBudgetError) and error.code in {"budget_exceeded", "budget_idempotency_conflict", "budget_invalid_transition"}
-            ):
-                logging.getLogger(__name__).warning("Shadow research budget admission unavailable")
-                return None
-            self.deny_new_calls(error.code if isinstance(error, ResearchBudgetError) else None)
-            raise ResearchBudgetError(error.code if isinstance(error, ResearchBudgetError) else None) from None
+            return self._admission_error(error)
+
+    def _admission_error(self, error):
+        if self.mode == "shadow" and not (
+            isinstance(error, ResearchBudgetError) and error.code in {"budget_exceeded", "budget_idempotency_conflict", "budget_invalid_transition"}
+        ):
+            logging.getLogger(__name__).warning("Shadow research budget admission unavailable")
+            return None
+        self.deny_new_calls(error.code if isinstance(error, ResearchBudgetError) else None)
+        raise ResearchBudgetError(error.code if isinstance(error, ResearchBudgetError) else None) from None
 
     def deny_new_calls(self, code=None):
         with self._lock:
@@ -182,7 +211,8 @@ class ResearchBudgetOperation:
         self._receipt = admission["receipt"]
         self.mode = admission["mode"]
         self.model_id = admission["modelId"]
-        self.max_output_tokens = admission["maxOutputTokens"]
+        self.embedding = admission.get("kind") == "tracked_embedding"
+        self.max_output_tokens = admission.get("maxOutputTokens")
         self._provider_id = None
         self._observed = False
         self._finalized = None
@@ -230,7 +260,7 @@ class ResearchBudgetOperation:
     def finalize(self, cost_usd: str):
         # Decimal string from native JSON. Do not coerce None/NaN/bool to zero or
         # turn a token estimate into native provider cost.
-        if not isinstance(cost_usd, str) or len(cost_usd) > 128 or not re.fullmatch(r"\d+(?:\.\d+)?(?:[eE][+-]?\d+)?", cost_usd):
+        if self.embedding or self._released or not isinstance(cost_usd, str) or len(cost_usd) > 128 or not re.fullmatch(r"\d+(?:\.\d+)?(?:[eE][+-]?\d+)?", cost_usd):
             raise ResearchBudgetError("budget_invalid_transition")
         if self._finalized is not None:
             if self._finalized != cost_usd:
@@ -238,6 +268,18 @@ class ResearchBudgetOperation:
             return
         if self._send({"action": "finalize", "providerUsageId": self._provider_id, "providerCostUsd": cost_usd}):
             self._finalized = cost_usd
+
+    def finalize_embedding(self, model: str, input_tokens: int):
+        if (not self.embedding or self._released or model != self.model_id
+                or type(input_tokens) is not int or not 0 <= input_tokens <= 300_000):
+            raise ResearchBudgetError("budget_invalid_transition")
+        if self._finalized is not None:
+            if self._finalized != input_tokens:
+                raise ResearchBudgetError("budget_idempotency_conflict")
+            return
+        if self._send({"action": "finalize_embedding", "modelId": model,
+                       "inputTokens": input_tokens, "providerUsageId": self._provider_id}):
+            self._finalized = input_tokens
 
 
 current_research_budget: ContextVar[ResearchBudget | None] = ContextVar("research_budget", default=None)

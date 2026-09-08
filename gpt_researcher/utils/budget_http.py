@@ -29,6 +29,14 @@ class NativeEvidence:
         value = json.loads(data, parse_float=Decimal)
         if not isinstance(value, dict):
             raise ResearchBudgetError()
+        if self.operation.embedding is True:
+            usage = value.get("usage")
+            if (not isinstance(usage, dict) or type(usage.get("prompt_tokens")) is not int
+                    or usage.get("prompt_tokens") != usage.get("total_tokens")
+                    or type(usage.get("total_tokens")) is not int):
+                raise ResearchBudgetError("budget_invalid_transition")
+            self.operation.finalize_embedding(value.get("model"), usage["prompt_tokens"])
+            return
         identity = value.get("id")
         if isinstance(identity, str) and re.fullmatch(r"gen-[A-Za-z0-9_-]+", identity) and len(identity) <= 256:
             self.operation.observe(identity)
@@ -130,6 +138,10 @@ class _ObservedStream(httpx.AsyncByteStream):
 
 
 def _prepare_request(budget, request, data):
+    if (request.method == "POST" and request.url.scheme == "https" and request.url.host == "api.openai.com"
+            and request.url.port in {None, 443} and request.url.path == "/v1/embeddings" and not request.url.query):
+        from .budget_embedding import prepare_embedding_request
+        return prepare_embedding_request(budget, request, data)
     if (request.method != "POST" or request.url.scheme != "https" or request.url.host != "openrouter.ai"
             or request.url.port not in {None, 443} or request.url.path != "/api/v1/chat/completions"
             or request.url.query):
@@ -196,8 +208,15 @@ class ResearchBudgetTransport(httpx.AsyncBaseTransport):
             self.budget.deny_new_calls()
         if operation is None:
             return response
+        if operation.embedding is True:
+            try:
+                await asyncio.to_thread(_observe_embedding_response, operation, response)
+            except BaseException:
+                self.budget.deny_new_calls()
+                await response.aclose()
+                raise
         return httpx.Response(response.status_code, headers=_decoded_headers(response), extensions=response.extensions,
-                              stream=_ObservedStream(_DecodedAsyncResponse(response), operation, "text/event-stream" in response.headers.get("content-type", ""), self.budget.deny_new_calls))
+                              stream=_ObservedStream(_DecodedAsyncResponse(response), operation, operation.embedding is not True and "text/event-stream" in response.headers.get("content-type", ""), self.budget.deny_new_calls))
 
     async def aclose(self):
         await self.native.aclose()
@@ -222,6 +241,12 @@ async def _drain_cancelled_admission(admission):
             # Repeated cancellation must not orphan the same receipt either.
             continue
     cleanup.result()
+
+
+def _observe_embedding_response(operation, response):
+    identity = response.headers.get("x-request-id")
+    if identity and len(identity) <= 256 and re.fullmatch(r"[A-Za-z0-9_-]+", identity):
+        operation.observe(identity)
 
 
 class _ObservedSyncStream(httpx.SyncByteStream):
@@ -279,8 +304,15 @@ class ResearchBudgetSyncTransport(httpx.BaseTransport):
             self.budget.deny_new_calls()
         if operation is None:
             return response
+        if operation.embedding is True:
+            try:
+                _observe_embedding_response(operation, response)
+            except BaseException:
+                self.budget.deny_new_calls()
+                response.close()
+                raise
         return httpx.Response(response.status_code, headers=_decoded_headers(response), extensions=response.extensions,
-                              stream=_ObservedSyncStream(_DecodedSyncResponse(response), operation, "text/event-stream" in response.headers.get("content-type", ""), self.budget.deny_new_calls))
+                              stream=_ObservedSyncStream(_DecodedSyncResponse(response), operation, operation.embedding is not True and "text/event-stream" in response.headers.get("content-type", ""), self.budget.deny_new_calls))
 
     def close(self):
         self.native.close()

@@ -1,4 +1,5 @@
 import os
+import logging
 from typing import Any
 
 OPENAI_EMBEDDING_MODEL = os.environ.get(
@@ -29,6 +30,26 @@ _SUPPORTED_PROVIDERS = {
 
 class Memory:
     def __init__(self, embedding_provider: str, model: str, **embedding_kwargs: Any):
+        from gpt_researcher.utils.budget import current_research_budget, ResearchBudgetError
+        budget = current_research_budget.get()
+        if budget is not None:
+            budget.raise_if_denied()
+            custom_clients = any(embedding_kwargs.get(key) is not None for key in
+                                 ("client", "async_client", "http_client", "http_async_client"))
+            endpoint = (embedding_kwargs.get("openai_api_base") or embedding_kwargs.get("base_url")
+                        or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1")
+            if (embedding_provider != "openai" or model != "text-embedding-3-small" or custom_clients
+                    or endpoint not in {"https://api.openai.com/v1", "https://api.openai.com/v1/"}):
+                if budget.mode == "enforce":
+                    raise ResearchBudgetError("budget_invalid_transition")
+                logging.getLogger(__name__).warning("Shadow research embedding provider is not metered")
+            else:
+                embedding_kwargs.update(budget.http_clients())
+                # Keep length-safe tokenization/splitting, but bound vector
+                # response size and per-request reservation, not research size.
+                embedding_kwargs["chunk_size"] = 16
+                if budget.mode == "enforce":
+                    embedding_kwargs["max_retries"] = 0
         _embeddings = None
         match embedding_provider:
             case "custom":
