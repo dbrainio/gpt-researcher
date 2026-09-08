@@ -2,6 +2,7 @@ import aiofiles
 import asyncio
 import importlib
 import json
+import logging
 import subprocess
 import sys
 import traceback
@@ -9,6 +10,7 @@ from typing import Any
 from colorama import Fore, Style, init
 import os
 from enum import Enum
+from contextlib import aclosing
 from gpt_researcher.utils.usage import extract_usage_report as _extract_usage_report
 
 _SUPPORTED_PROVIDERS = {
@@ -332,25 +334,40 @@ class GenericLLMProvider:
         response = ""
         last_usage_report = None
 
-        # Streaming the response using the chain astream method from langchain
-        async for chunk in self.llm.astream(messages, **kwargs):
-            usage_report = _extract_usage_report(chunk, self.model_id)
-            if usage_report:
-                last_usage_report = usage_report
+        # Usage chunks describe cumulative snapshots, not additive deltas. Keep
+        # the latest evidence and publish it once, including on cancellation or
+        # a downstream WebSocket/file failure after the provider charged us.
+        try:
+            # Close upstream promptly when the consumer disappears; don't leave
+            # a paid stream running until async-generator garbage collection.
+            async with aclosing(self.llm.astream(messages, **kwargs)) as stream:
+                async for chunk in stream:
+                    usage_report = _extract_usage_report(chunk, self.model_id)
+                    if usage_report:
+                        last_usage_report = usage_report
 
-            content = chunk.content
-            if content is not None:
-                response += content
-                paragraph += content
-                if "\n" in paragraph:
-                    await self._send_output(paragraph, websocket)
-                    paragraph = ""
+                    content = chunk.content
+                    if content is not None:
+                        response += content
+                        paragraph += content
+                        if "\n" in paragraph:
+                            await self._send_output(paragraph, websocket)
+                            paragraph = ""
 
-        if paragraph:
-            await self._send_output(paragraph, websocket)
-
-        if last_usage_report and cost_callback:
-            cost_callback(last_usage_report)
+            if paragraph:
+                await self._send_output(paragraph, websocket)
+        except BaseException:
+            if last_usage_report and cost_callback:
+                try:
+                    cost_callback(last_usage_report)
+                except Exception:
+                    # Preserve the original failure/cancellation. Never include
+                    # request payloads or provider credentials in this log.
+                    logging.getLogger(__name__).error("Research usage callback failed during stream cleanup")
+            raise
+        else:
+            if last_usage_report and cost_callback:
+                cost_callback(last_usage_report)
 
         return response
 
