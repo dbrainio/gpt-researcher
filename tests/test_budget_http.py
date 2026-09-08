@@ -1,10 +1,12 @@
 """Real HTTPX transport API, entirely in-memory provider/callback responses."""
 import importlib.util
+import asyncio
 import json
 import gzip
 from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
+from threading import Event
 import unittest
 from unittest.mock import Mock, patch
 
@@ -39,6 +41,55 @@ class Chunks(httpx.AsyncByteStream):
 
 
 class BudgetHTTPTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cancelled_admission_releases_late_receipt_without_native_call(self):
+        entered, resume = Event(), Event()
+        native = Mock()
+        client, budget, operation = self.setup_client(native)
+        def reserve(*args):
+            entered.set()
+            if not resume.wait(5):
+                raise AssertionError("test admission was not resumed")
+            return operation
+        budget.reserve_model.side_effect = reserve
+        pending = asyncio.create_task(client.post(URL, json={"model": "gpt-4o-mini", "messages": []}))
+        try:
+            self.assertTrue(await asyncio.to_thread(entered.wait, 5))
+            pending.cancel()
+            await asyncio.sleep(0)
+            pending.cancel()
+        finally:
+            resume.set()
+        with self.assertRaises(asyncio.CancelledError):
+            await pending
+        native.assert_not_called()
+        operation.mark_started.assert_not_called()
+        operation.release_unstarted.assert_called_once()
+
+    async def test_cancellation_after_native_send_never_releases_reservation(self):
+        entered = asyncio.Event()
+        async def native(request):
+            entered.set()
+            await asyncio.Future()
+        client, budget, operation = self.setup_client(native)
+        pending = asyncio.create_task(client.post(URL, json={"model": "gpt-4o-mini", "messages": []}))
+        await asyncio.wait_for(entered.wait(), 5)
+        pending.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await pending
+        operation.mark_started.assert_called_once()
+        operation.release_unstarted.assert_not_called()
+        budget.deny_new_calls.assert_called_once()
+
+    async def test_cancelled_admission_cleanup_failure_preserves_cancellation(self):
+        admission = asyncio.create_task(asyncio.sleep(0, result=(None, Mock())))
+        await admission
+        operation = admission.result()[1]
+        operation.release_unstarted.side_effect = RuntimeError("private receipt")
+        with self.assertLogs(module.__name__, level="WARNING") as logs:
+            await module._drain_cancelled_admission(admission)
+        self.assertNotIn("private receipt", str(logs.output))
+        operation.release_unstarted.assert_called_once()
+
     async def test_compressed_native_evidence_is_decoded_once(self):
         raw = b'{"id":"gen-compressed","usage":{"cost":0.2}}'
         client, _, operation = self.setup_client(lambda _: httpx.Response(200, headers={"content-type": "application/json", "content-encoding": "gzip"}, stream=Chunks([gzip.compress(raw)])))

@@ -186,6 +186,8 @@ class ResearchBudgetOperation:
         self._provider_id = None
         self._observed = False
         self._finalized = None
+        self._started = False
+        self._released = False
 
     def __repr__(self):
         return f"ResearchBudgetOperation(mode={self.mode!r}, model_id={self.model_id!r})"
@@ -211,6 +213,19 @@ class ResearchBudgetOperation:
         self._provider_id = provider_id
         if self._send({"action": "observe", "providerUsageId": provider_id}):
             self._observed = True
+
+    def mark_started(self):
+        if self._released:
+            raise ResearchBudgetError("budget_invalid_transition")
+        self._started = True
+
+    def release_unstarted(self):
+        # Called only by the transport that still owns admission. An exception
+        # after native.send is ambiguous even if no provider ID was received.
+        if self._started or self._provider_id is not None or self._finalized is not None:
+            raise ResearchBudgetError("budget_invalid_transition")
+        if not self._released and self._send({"action": "release", "reason": "provider_not_called"}):
+            self._released = True
 
     def finalize(self, cost_usd: str):
         # Decimal string from native JSON. Do not coerce None/NaN/bool to zero or

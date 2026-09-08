@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from decimal import Decimal
 import json
+import logging
 import re
 
 import httpx
@@ -173,11 +174,21 @@ class ResearchBudgetTransport(httpx.AsyncBaseTransport):
         self.native = native_client if native_client is not None else httpx.AsyncClient(follow_redirects=False)
 
     async def handle_async_request(self, request):
-        request, operation = await asyncio.to_thread(_prepare_request, self.budget, request, await request.aread())
+        data = await request.aread()
+        admission = asyncio.create_task(asyncio.to_thread(_prepare_request, self.budget, request, data))
+        try:
+            request, operation = await asyncio.shield(admission)
+        except asyncio.CancelledError:
+            # to_thread keeps running after caller cancellation. Retain ownership
+            # until the bounded callback returns; never abandon a late receipt.
+            await _drain_cancelled_admission(admission)
+            raise
         # No refunds or retries for any exception/status after this point.
+        if operation is not None:
+            operation.mark_started()
         try:
             response = await self.native.send(request, stream=True, follow_redirects=False)
-        except Exception:
+        except BaseException:
             if operation is not None and operation.mode == "enforce":
                 self.budget.deny_new_calls()
             raise
@@ -190,6 +201,27 @@ class ResearchBudgetTransport(httpx.AsyncBaseTransport):
 
     async def aclose(self):
         await self.native.aclose()
+
+
+async def _drain_cancelled_admission(admission):
+    async def release():
+        try:
+            _, operation = await admission
+            if operation is not None:
+                await asyncio.to_thread(operation.release_unstarted)
+        except Exception:
+            # Unknown admission or failed release stays held. Preserve the
+            # original cancellation and never include credentials/payloads.
+            logging.getLogger(__name__).warning("Cancelled research admission cleanup unavailable")
+
+    cleanup = asyncio.create_task(release())
+    while not cleanup.done():
+        try:
+            await asyncio.shield(cleanup)
+        except asyncio.CancelledError:
+            # Repeated cancellation must not orphan the same receipt either.
+            continue
+    cleanup.result()
 
 
 class _ObservedSyncStream(httpx.SyncByteStream):
@@ -235,6 +267,8 @@ class ResearchBudgetSyncTransport(httpx.BaseTransport):
 
     def handle_request(self, request):
         request, operation = _prepare_request(self.budget, request, request.read())
+        if operation is not None:
+            operation.mark_started()
         try:
             response = self.native.send(request, stream=True, follow_redirects=False)
         except Exception:

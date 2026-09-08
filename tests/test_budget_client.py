@@ -19,6 +19,23 @@ def tracked(mode="enforce"):
 
 
 class BudgetClientTests(unittest.TestCase):
+    def test_only_provably_unstarted_operation_can_release(self):
+        callback = Mock(return_value={"kind": "acknowledged"})
+        operation = budget.ResearchBudgetOperation(callback, tracked())
+        operation.release_unstarted()
+        operation.release_unstarted()
+        callback.assert_called_once_with(RECEIPT, {"action": "release", "reason": "provider_not_called"})
+        with self.assertRaises(budget.ResearchBudgetError):
+            operation.mark_started()
+        for action in [lambda op: op.mark_started(), lambda op: op.observe("gen-native"), lambda op: op.finalize("0")]:
+            callback.reset_mock()
+            operation = budget.ResearchBudgetOperation(callback, tracked())
+            action(operation)
+            callback.reset_mock()
+            with self.assertRaises(budget.ResearchBudgetError):
+                operation.release_unstarted()
+            callback.assert_not_called()
+
     def test_wrapped_sdk_errors_preserve_the_budget_code_and_cycles_terminate(self):
         native = budget.ResearchBudgetError("budget_exceeded")
         sdk = RuntimeError("connection wrapper")
