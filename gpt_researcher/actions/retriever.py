@@ -1,3 +1,6 @@
+from gpt_researcher.utils.budget import require_budget_coverage
+
+
 def get_retriever(retriever: str):
     """
     Gets the retriever
@@ -8,6 +11,9 @@ def get_retriever(retriever: str):
         retriever: Retriever class
 
     """
+    # The deployed B2C profile uses Tavily. Alternate library integrations need
+    # their own native admission/usage contract before enabling enforcement.
+    require_budget_coverage("retriever", retriever, ("tavily",))
     match retriever:
         case "google":
             from gpt_researcher.retrievers import GoogleSearch
@@ -101,7 +107,7 @@ def get_retrievers(headers: dict[str, str], cfg):
         retrievers = [cfg.retriever]
     # If still not set, use default retriever
     else:
-        retrievers = [get_default_retriever().__name__]
+        retrievers = ["tavily"]
 
     # Convert retriever names to actual retriever classes
     # Use get_default_retriever() as a fallback for any invalid retriever names

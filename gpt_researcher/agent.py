@@ -159,6 +159,8 @@ class GPTResearcher:
         # Process MCP configurations if provided
         self.mcp_configs = mcp_configs
         if mcp_configs:
+            from .utils.budget import require_budget_coverage
+            require_budget_coverage("external_mcp", "enabled", ())
             self._process_mcp_configs(mcp_configs)
         
         self.retrievers = get_retrievers(self.headers, self.cfg)

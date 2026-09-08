@@ -9,6 +9,7 @@ import importlib
 import logging
 
 from gpt_researcher.utils.workers import WorkerPool
+from gpt_researcher.utils.budget import require_budget_coverage
 
 from . import (
     ArxivScraper,
@@ -33,6 +34,7 @@ class Scraper:
         Args:
             urls:
         """
+        require_budget_coverage("scraper", scraper, ("bs", "pdf", "arxiv", "web_base_loader", "browser", "nodriver", "tavily_extract"))
         self.urls = urls
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": user_agent})
@@ -189,6 +191,7 @@ class Scraper:
             scraper_key = self.scraper
 
         scraper_class = SCRAPER_CLASSES.get(scraper_key)
+        require_budget_coverage("scraper", scraper_key, ("bs", "pdf", "arxiv", "web_base_loader", "browser", "nodriver", "tavily_extract"))
         if scraper_class is None:
             raise Exception("Scraper not found.")
 

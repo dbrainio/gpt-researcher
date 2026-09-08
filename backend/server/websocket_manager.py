@@ -118,6 +118,8 @@ async def run_agent(task, report_type, report_source, source_urls, document_urls
 
     # Set up MCP configuration if enabled
     if mcp_enabled and mcp_configs:
+        from gpt_researcher.utils.budget import require_budget_coverage
+        require_budget_coverage("external_mcp", "enabled", ())
         import os
         current_retriever = os.getenv("RETRIEVER", "tavily")
         if "mcp" not in current_retriever:

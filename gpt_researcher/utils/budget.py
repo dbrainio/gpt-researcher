@@ -321,6 +321,22 @@ class ResearchBudgetOperation:
 current_research_budget: ContextVar[ResearchBudget | None] = ContextVar("research_budget", default=None)
 
 
+def require_budget_coverage(component: str, selected: str, supported: tuple[str, ...]):
+    """Fail closed on configuration drift, without changing off/B2B execution."""
+    run = current_research_budget.get()
+    if run is None:
+        return
+    run.ensure_active()
+    if selected in supported:
+        return
+    if run.mode == "shadow":
+        # Never log arbitrary selected values, MCP endpoints or credentials.
+        logging.getLogger(__name__).warning("Shadow research configuration has an unmetered component")
+        return
+    run.deny_new_calls("budget_invalid_transition")
+    raise ResearchBudgetError("budget_invalid_transition")
+
+
 def find_budget_error(error):
     seen = set()
     for _ in range(8):
