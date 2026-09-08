@@ -6,6 +6,7 @@ The application owns entitlement, prices, funding and receipt verification.
 from __future__ import annotations
 
 from contextvars import ContextVar
+import asyncio
 import json
 import logging
 import os
@@ -93,6 +94,9 @@ class ResearchBudget:
         self._callback = callback if callback is not None else BudgetCallback(os.environ.get("NEVEL_BUDGET_URL", ""))
         self._counter = 0
         self._lock = Lock()
+        self._clients = None
+        self._closed = False
+        self._failure = None
 
     def __repr__(self):
         return f"ResearchBudget(mode={self.mode!r})"
@@ -100,6 +104,8 @@ class ResearchBudget:
     def reserve_model(self, model: str, input_bytes: int, max_output_tokens: int):
         # One namespace across child researchers and concurrent executor threads.
         with self._lock:
+            if self._closed or self._failure:
+                raise ResearchBudgetError(self._failure or "budget_invalid_transition")
             step = self._counter
             self._counter += 1
         try:
@@ -124,11 +130,41 @@ class ResearchBudget:
             return ResearchBudgetOperation(self._callback, result)
         except Exception as error:
             if self.mode == "shadow" and not (
-                isinstance(error, ResearchBudgetError) and error.code in {"budget_idempotency_conflict", "budget_invalid_transition"}
+                isinstance(error, ResearchBudgetError) and error.code in {"budget_exceeded", "budget_idempotency_conflict", "budget_invalid_transition"}
             ):
                 logging.getLogger(__name__).warning("Shadow research budget admission unavailable")
                 return None
+            self.deny_new_calls(error.code if isinstance(error, ResearchBudgetError) else None)
             raise ResearchBudgetError(error.code if isinstance(error, ResearchBudgetError) else None) from None
+
+    def deny_new_calls(self, code=None):
+        with self._lock:
+            self._failure = ResearchBudgetError(code).code
+
+    def http_clients(self):
+        # Reuse one connection pool pair per run, not one pair per model step.
+        with self._lock:
+            if self._closed:
+                raise ResearchBudgetError("budget_invalid_transition")
+            if self._clients is None:
+                import httpx
+                from .budget_http import ResearchBudgetTransport, ResearchBudgetSyncTransport
+                self._clients = {
+                    "http_client": httpx.Client(transport=ResearchBudgetSyncTransport(self), trust_env=False),
+                    "http_async_client": httpx.AsyncClient(transport=ResearchBudgetTransport(self), trust_env=False),
+                }
+            return dict(self._clients)
+
+    async def aclose(self):
+        with self._lock:
+            self._closed = True
+            clients = self._clients
+            self._clients = None
+        if clients is not None:
+            try:
+                await clients["http_async_client"].aclose()
+            finally:
+                await asyncio.to_thread(clients["http_client"].close)
 
 
 class ResearchBudgetOperation:

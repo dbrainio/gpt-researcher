@@ -141,6 +141,23 @@ class GenericLLMProvider:
 
     @classmethod
     def from_provider(cls, provider: str, chat_log: str | None = None, verbose: bool=True, **kwargs: Any):
+        from gpt_researcher.utils.budget import current_research_budget, ResearchBudgetError
+        budget = current_research_budget.get()
+        if budget is not None:
+            if provider != "openrouter":
+                if budget.mode == "enforce":
+                    raise ResearchBudgetError("budget_invalid_transition")
+            else:
+                if "http_client" in kwargs or "http_async_client" in kwargs:
+                    if budget.mode == "enforce":
+                        raise ResearchBudgetError("budget_invalid_transition")
+                    logging.getLogger(__name__).warning("Shadow research custom HTTP client is not budget-instrumented")
+                else:
+                    kwargs.update(budget.http_clients())
+                # LangChain/OpenAI SDK retries would be new native requests with
+                # new step numbers. Disable before any paid call in enforcement.
+                if budget.mode == "enforce":
+                    kwargs["max_retries"] = 0
         model_id = kwargs.get("model") or kwargs.get("model_name") or kwargs.get("model_id")
 
         if provider == "openai":

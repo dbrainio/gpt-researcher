@@ -55,10 +55,12 @@ class BudgetClientTests(unittest.TestCase):
         self.assertNotIn("private callback payload", str(caught.exception))
 
     def test_shadow_unavailable_is_nonblocking_but_replay_never_reexecutes(self):
-        for code, denied in [("budget_internal_error", False), ("budget_invalid_transition", True), ("budget_idempotency_conflict", True)]:
+        for code, denied in [("budget_internal_error", False), ("budget_exceeded", True), ("budget_invalid_transition", True), ("budget_idempotency_conflict", True)]:
             callback = Mock(side_effect=budget.ResearchBudgetError(code))
             run = budget.ResearchBudget(CAP, "shadow", callback)
             if denied:
+                with self.assertRaises(budget.ResearchBudgetError):
+                    run.reserve_model("gpt-4o-mini", 400, 500)
                 with self.assertRaises(budget.ResearchBudgetError):
                     run.reserve_model("gpt-4o-mini", 400, 500)
             else:
