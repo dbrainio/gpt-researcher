@@ -231,6 +231,16 @@ class ResearchBudget:
 
 class ResearchBudgetOperation:
     def __init__(self, callback, admission):
+        pair = admission.get("correlation")
+        if (not isinstance(pair, dict) or set(pair) != {"budget_operation_id", "budget_reservation_id"}
+                or not isinstance(pair.get("budget_operation_id"), str)
+                or len(pair["budget_operation_id"]) > 256
+                or re.fullmatch(r"deep-research:[A-Za-z0-9_:-]+:[0-9]+", pair["budget_operation_id"]) is None
+                or not isinstance(pair.get("budget_reservation_id"), str)
+                or re.fullmatch(r"[A-Za-z0-9_-]{16}", pair["budget_reservation_id"]) is None):
+            raise ResearchBudgetError("budget_invalid_transition")
+        # These are diagnostics only. The bearer receipt stays private below.
+        self.correlation = dict(pair)
         self._callback = callback
         self._receipt = admission["receipt"]
         self.mode = admission["mode"]

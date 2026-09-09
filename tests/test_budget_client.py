@@ -15,10 +15,23 @@ RECEIPT = "nbgt1.receipt." + "s" * 43
 
 
 def tracked(mode="enforce"):
-    return {"kind": "tracked", "receipt": RECEIPT, "mode": mode, "modelId": "openai/gpt-4o-mini", "maxOutputTokens": 200}
+    return {"kind": "tracked", "receipt": RECEIPT, "mode": mode, "modelId": "openai/gpt-4o-mini", "maxOutputTokens": 200,
+            "correlation": {"budget_operation_id": "deep-research:run:0", "budget_reservation_id": "reservation00001"}}
 
 
 class BudgetClientTests(unittest.TestCase):
+    def test_requires_safe_explicit_correlation_without_decoding_receipt(self):
+        for pair in [None, {}, {"budget_operation_id": RECEIPT, "budget_reservation_id": "reservation00001"},
+                     {"budget_operation_id": "deep-research:run:0", "budget_reservation_id": "bad"},
+                     {**tracked()["correlation"], "receipt": RECEIPT}]:
+            with self.assertRaises(budget.ResearchBudgetError):
+                budget.ResearchBudgetOperation(Mock(), {**tracked(), "correlation": pair})
+        admission = tracked()
+        operation = budget.ResearchBudgetOperation(Mock(), admission)
+        admission["correlation"]["budget_operation_id"] = "changed"
+        self.assertEqual(operation.correlation["budget_operation_id"], "deep-research:run:0")
+        self.assertNotIn(RECEIPT, str(operation.correlation))
+
     def test_only_provably_unstarted_operation_can_release(self):
         callback = Mock(return_value={"kind": "acknowledged"})
         operation = budget.ResearchBudgetOperation(callback, tracked())

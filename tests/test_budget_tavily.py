@@ -27,7 +27,8 @@ def load(name, path):
 
 
 def admitted(payload):
-    return {"kind": "tracked_tavily", "receipt": RECEIPT, "mode": "enforce", "endpoint": payload["endpoint"], "depth": payload["depth"]}
+    return {"kind": "tracked_tavily", "receipt": RECEIPT, "mode": "enforce", "endpoint": payload["endpoint"], "depth": payload["depth"],
+            "correlation": {"budget_operation_id": "deep-research:run:0", "budget_reservation_id": "reservation00001"}}
 
 
 def response(credits=1):

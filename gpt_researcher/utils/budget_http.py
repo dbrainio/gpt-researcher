@@ -186,6 +186,11 @@ def _prepare_request(budget, request, data):
         body["usage"] = {"include": True}
         if body.get("stream"):
             body["stream_options"] = {**body.get("stream_options", {}), "include_usage": True}
+    if operation is not None:
+        trace = body.get("trace")
+        # Preserve event attribution, replace caller-supplied operation fields.
+        # No capability/receipt, callback URL or subject payload is forwarded.
+        body["trace"] = {**(trace if isinstance(trace, dict) else {}), **operation.correlation}
         headers = request.headers.copy()
         headers.pop("content-length", None)
         request = httpx.Request(request.method, request.url, headers=headers, json=body, extensions=request.extensions)

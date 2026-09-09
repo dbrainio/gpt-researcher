@@ -17,7 +17,8 @@ URL = "https://api.openai.com/v1/embeddings"
 
 
 def admission():
-    return {"kind": "tracked_embedding", "receipt": RECEIPT, "mode": "enforce", "modelId": MODEL}
+    return {"kind": "tracked_embedding", "receipt": RECEIPT, "mode": "enforce", "modelId": MODEL,
+            "correlation": {"budget_operation_id": "deep-research:run:0", "budget_reservation_id": "reservation00001"}}
 
 
 def result(tokens=2, model=MODEL):

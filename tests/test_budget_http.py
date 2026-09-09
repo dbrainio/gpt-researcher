@@ -41,6 +41,33 @@ class Chunks(httpx.AsyncByteStream):
 
 
 class BudgetHTTPTests(unittest.IsolatedAsyncioTestCase):
+    async def test_concurrent_wire_correlation_is_per_operation_and_never_a_receipt(self):
+        for mode in ["shadow", "enforce"]:
+            bodies = []
+            def native(request):
+                bodies.append(json.loads(request.content))
+                return httpx.Response(200, json={"id": "gen-native", "usage": {"cost": 0.1}})
+            client, budget, _ = self.setup_client(native, mode)
+            operations = []
+            for step in range(2):
+                operations.append(Mock(mode=mode, model_id="openai/gpt-4o-mini", max_output_tokens=200,
+                                       correlation={"budget_operation_id": f"deep-research:run:{step}",
+                                                    "budget_reservation_id": f"reservation0000{step}"}))
+            budget.reserve_model.side_effect = operations
+            body = {"model": "gpt-4o-mini", "messages": [], "max_tokens": 900,
+                    "trace": {"app_event_id": "event-shared", "workspace_id": "workspace0000001",
+                              "budget_operation_id": "untrusted-old-operation"}}
+            await asyncio.gather(client.post(URL, json=body), client.post(URL, json=body))
+            self.assertEqual({b["trace"]["budget_operation_id"] for b in bodies},
+                             {"deep-research:run:0", "deep-research:run:1"})
+            for sent in bodies:
+                self.assertEqual(sent["trace"]["app_event_id"], "event-shared")
+                self.assertEqual(sent["trace"]["workspace_id"], "workspace0000001")
+                self.assertEqual(sent["max_tokens"], 200 if mode == "enforce" else 900)
+                self.assertNotIn("receipt", sent)
+                self.assertNotIn("nbgt1.", json.dumps(sent))
+            self.assertEqual(body["trace"]["budget_operation_id"], "untrusted-old-operation")
+
     async def test_cancelled_admission_releases_late_receipt_without_native_call(self):
         entered, resume = Event(), Event()
         native = Mock()
@@ -143,6 +170,7 @@ class BudgetHTTPTests(unittest.IsolatedAsyncioTestCase):
 
     def setup_client(self, handler, mode="enforce"):
         operation = Mock(mode=mode, model_id="openai/gpt-4o-mini", max_output_tokens=200)
+        operation.correlation = {"budget_operation_id": "deep-research:run:0", "budget_reservation_id": "reservation00001"}
         budget = Mock(mode=mode)
         budget.reserve_model.return_value = operation
         native = httpx.AsyncClient(transport=httpx.MockTransport(handler))
@@ -233,6 +261,7 @@ class BudgetHTTPTests(unittest.IsolatedAsyncioTestCase):
 class SyncBudgetHTTPTests(unittest.TestCase):
     def test_sync_chain_uses_the_same_native_reservation_boundary(self):
         operation = Mock(mode="enforce", model_id="openai/gpt-4o-mini", max_output_tokens=200)
+        operation.correlation = {"budget_operation_id": "deep-research:run:0", "budget_reservation_id": "reservation00001"}
         budget = Mock(mode="enforce")
         budget.reserve_model.return_value = operation
         calls = []
