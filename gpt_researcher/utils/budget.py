@@ -125,7 +125,7 @@ class ResearchBudget:
                     or not 1 <= input_tokens <= 300_000):
                 raise ResearchBudgetError("budget_invalid_transition")
             result = self._callback(self._capability, {
-                "action": "reserve_embedding", "step": step, "modelId": model, "inputTokens": input_tokens,
+                "action": "reserve_embedding", "step": step, "modelId": model, "inputTokens": input_tokens, "correlationVersion": 1,
             })
             if result == {"kind": "bypass"}:
                 return None
@@ -144,7 +144,7 @@ class ResearchBudget:
                     or type(max_output_tokens) is not int or not 1 <= max_output_tokens <= 32_000):
                 raise ResearchBudgetError()
             result = self._callback(self._capability, {
-                "action": "reserve", "step": step, "provider": "openrouter",
+                "action": "reserve", "step": step, "provider": "openrouter", "correlationVersion": 1,
                 "modelId": model, "inputBytes": input_bytes, "maxOutputTokens": max_output_tokens,
             })
             if result == {"kind": "bypass"}:
@@ -168,7 +168,7 @@ class ResearchBudget:
                     or type(units) is not int or not 1 <= units <= 20 or (endpoint == "search" and units != 1)):
                 raise ResearchBudgetError("budget_invalid_transition")
             result = self._callback(self._capability, {
-                "action": "reserve_tavily", "step": step, "endpoint": endpoint, "depth": depth, "units": units,
+                "action": "reserve_tavily", "step": step, "endpoint": endpoint, "depth": depth, "units": units, "correlationVersion": 1,
             })
             if result == {"kind": "bypass"}:
                 return None

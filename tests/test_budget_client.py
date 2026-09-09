@@ -64,7 +64,7 @@ class BudgetClientTests(unittest.TestCase):
         operation = run.reserve_model("gpt-4o-mini", 400, 500)
         self.assertEqual(operation.model_id, "openai/gpt-4o-mini")
         self.assertEqual(operation.max_output_tokens, 200)
-        self.assertEqual(callback.call_args_list[0].args, (CAP, {"action": "reserve", "step": 0, "provider": "openrouter", "modelId": "gpt-4o-mini", "inputBytes": 400, "maxOutputTokens": 500}))
+        self.assertEqual(callback.call_args_list[0].args, (CAP, {"action": "reserve", "step": 0, "provider": "openrouter", "modelId": "gpt-4o-mini", "inputBytes": 400, "maxOutputTokens": 500, "correlationVersion": 1}))
         operation.observe("gen-native")
         operation.finalize("0.0000001")
         self.assertEqual(callback.call_args_list[-1].args, (RECEIPT, {"action": "finalize", "providerUsageId": "gen-native", "providerCostUsd": "0.0000001"}))
